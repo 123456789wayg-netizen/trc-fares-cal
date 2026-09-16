@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>台鐵票價試算器</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 min-h-screen flex items-center justify-center p-4">
+
+  <div class="bg-white rounded-xl shadow-lg p-6 w-full max-w-md border border-slate-200">
+    <h1 class="text-2xl font-bold text-center text-blue-900 mb-6 flex items-center justify-center gap-2">
+      🚆 台鐵票價試算器
+    </h1>
+
+    <!-- 路線與路線分支 -->
+    <div class="space-y-4">
+      <!-- 出發站與到達站 -->
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">起程站</label>
+          <select id="startStation" class="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">到達站</label>
+          <select id="endStation" class="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+          </select>
+        </div>
+      </div>
+
+      <!-- 車種選擇 -->
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1">搭乘車種</label>
+        <select id="trainType" class="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+          <option value="local">區間車 / 復興號</option>
+          <option value="chu_kuang">莒光號</option>
+          <option value="tzu_chiang" selected>自強號 (含 EMU3000 / 普悠瑪)</option>
+        </select>
+      </div>
+
+      <!-- 票種選擇 -->
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1">票種</label>
+        <select id="ticketType" class="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+          <option value="full">成人全票</option>
+          <option value="concession">優待票 (孩童 / 敬老 / 愛心 5折)</option>
+        </select>
+      </div>
+
+      <!-- 計算按鈕 -->
+      <button onclick="calculateFare()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg transition duration-200 shadow">
+        計算票價
+      </button>
+    </div>
+
+    <!-- 顯示結果 -->
+    <div id="resultBox" class="mt-6 p-4 bg-slate-50 rounded-lg border border-slate-200 hidden">
+      <div class="text-sm text-slate-500 space-y-1">
+        <p>搭乘區間：<span id="routeInfo" class="font-medium text-slate-800"></span></p>
+        <p>計費里程：<span id="distanceInfo" class="font-medium text-slate-800"></span> 公里</p>
+      </div>
+      <hr class="my-3 border-slate-200">
+      <div class="flex justify-between items-baseline">
+        <span class="text-slate-700 font-medium">預估票價：</span>
+        <span class="text-3xl font-extrabold text-blue-600">$<span id="farePrice">0</span></span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 主要車站里程資料庫 (以西部幹線為主，基隆為 0.0 公里)
+    const stations = [
+      { id: "1000", name: "基隆", km: 0.0 },
+      { id: "1001", name: "八堵", km: 3.7 },
+      { id: "1008", name: "台北", km: 28.3 },
+      { id: "1011", name: "板橋", km: 35.5 },
+      { id: "1015", name: "新竹", km: 106.4 },
+      { id: "1025", name: "苗栗", km: 140.8 },
+      { id: "1150", name: "台中", km: 193.4 },
+      { id: "1190", name: "彰化", km: 210.9 },
+      { id: "1210", name: "員林", km: 225.6 },
+      { id: "1230", name: "斗六", km: 260.4 },
+      { id: "1250", name: "嘉義", km: 291.8 },
+      { id: "1300", name: "新營", km: 319.9 },
+      { id: "1319", name: "台南", km: 347.5 },
+      { id: "1350", name: "新左營", km: 364.6 },
+      { id: "1380", name: "高雄", km: 371.8 },
+      { id: "1400", name: "屏東", km: 392.8 }
+    ];
+
+    // 初始化選單
+    function initSelects() {
+      const startSelect = document.getElementById("startStation");
+      const endSelect = document.getElementById("endStation");
+
+      stations.forEach((station, index) => {
+        const option1 = new Option(station.name, station.km);
+        const option2 = new Option(station.name, station.km);
+        
+        startSelect.add(option1);
+        endSelect.add(option2);
+      });
+
+      // 預設起終點：台北 到 高雄
+      startSelect.selectedIndex = 2; // 台北
+      endSelect.selectedIndex = 14;  // 高雄
+    }
+
+    // 核心算票價邏輯 (含起跳里程與遞遠遞減)
+    function calcBaseFare(distance) {
+      let d = Math.max(distance, 11); // 起跳里程 11 公里
+      const BASE_RATE = 1.82; // 新版區間車單價
+      let fare = 0;
+
+      if (d <= 70) {
+        fare = d * BASE_RATE;
+      } else if (d <= 200) {
+        fare = (70 * BASE_RATE) + ((d - 70) * BASE_RATE * 0.85);
+      } else {
+        fare = (70 * BASE_RATE) + (130 * BASE_RATE * 0.85) + ((d - 200) * BASE_RATE * 0.7);
+      }
+      return fare;
+    }
+
+    // 按鈕點擊事件處理
+    function calculateFare() {
+      const startSelect = document.getElementById("startStation");
+      const endSelect = document.getElementById("endStation");
+      
+      const startKm = parseFloat(startSelect.value);
+      const endKm = parseFloat(endSelect.value);
+
+      if (startKm === endKm) {
+        alert("起程站與到達站不能相同！");
+        return;
+      }
+
+      const startName = startSelect.options[startSelect.selectedIndex].text;
+      const endName = endSelect.options[endSelect.selectedIndex].text;
+      
+      const distance = Math.abs(endKm - startKm).toFixed(1);
+      const trainType = document.getElementById("trainType").value;
+      const ticketType = document.getElementById("ticketType").value;
+
+      // 車種費率倍率
+      const multipliers = {
+        'local': 1.0,
+        'chu_kuang': 1.2,
+        'tzu_chiang': 1.55
+      };
+
+      // 計算最終票價
+      let baseFare = calcBaseFare(distance);
+      let totalFare = baseFare * multipliers[trainType];
+
+      if (ticketType === 'concession') {
+        totalFare *= 0.5;
+      }
+
+      const finalPrice = Math.round(totalFare);
+
+      // 渲染結果到畫面
+      document.getElementById("routeInfo").innerText = `${startName} → ${endName}`;
+      document.getElementById("distanceInfo").innerText = distance;
+      document.getElementById("farePrice").innerText = finalPrice;
+      document.getElementById("resultBox").classList.remove("hidden");
+    }
+
+    // 頁面載入時執行
+    window.onload = initSelects;
+  </script>
+</body>
+</html>
